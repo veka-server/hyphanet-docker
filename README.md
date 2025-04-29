@@ -27,7 +27,7 @@ A ready-to-use Docker image for Hyphanet that:
 ```bash
 docker run -d \
   --name hyphanet \
-  -p 8000:8000 \
+  -p 8123:8123 \
   -v hyphanet_data:/data \
   poullorca/hyphanet-node:latest
 ```
@@ -36,7 +36,7 @@ docker run -d \
 1. Wait 2-3 minutes for initial setup
 2. Open in your browser:
    ```
-   http://localhost:8000
+   http://localhost:8123
    ```
 
 ## Data Persistence
@@ -53,7 +53,7 @@ docker exec -it hyphanet ls /data
 - 🔐 FProxy bound to container network only by default
 - 🛡️ All sensitive files stored in isolated volume
 - 📜 Automatic log rotation
-- ⚠️ Never expose port 8000 publicly without authentication
+- ⚠️ Never expose port 8123 publicly without authentication
 
 ## Disclaimer
 This project is provided as-is. The maintainer:
@@ -71,7 +71,7 @@ This project is provided as-is. The maintainer:
 docker build -t hyphanet-node .
 
 # Test locally
-docker run -it --rm -p 8000:8000 hyphanet-node
+docker run -it --rm -p 8123:8123 hyphanet-node
 
 # Contributing
 PRs welcome at https://github.com/PoulLorca/hyphanet-docker

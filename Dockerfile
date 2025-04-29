@@ -100,7 +100,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 USER ${HYPHANET_USER}
 WORKDIR ${HYPHANET_HOME}
 
-EXPOSE 8000
+EXPOSE 8123
 VOLUME [ "${HYPHANET_DATA}" ]
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
