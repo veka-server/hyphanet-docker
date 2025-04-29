@@ -4,14 +4,42 @@ set -e
 HYPHANET_HOME=${HYPHANET_HOME:-/opt/hyphanet}
 HYPHANET_DATA=${HYPHANET_DATA:-/data}
 
+SOCAT_LISTEN_PORT=8000
+HYPHANET_FPROXY_PORT=8888
+
 echo "--- Entrypoint Start ---"
 echo "DEBUG: Current User: $(whoami)"
 echo "DEBUG: HYPHANET_HOME: ${HYPHANET_HOME}"
 echo "DEBUG: HYPHANET_DATA: ${HYPHANET_DATA}"
+echo "DEBUG: SOCAT Listen Port: ${SOCAT_LISTEN_PORT}"
+echo "DEBUG: Hyphanet Fproxy Port: ${HYPHANET_FPROXY_PORT}"
 echo "-------------------------"
+
+echo "Searching for freenet.ini file..."
+POTENTIAL_INI_PATHS=(
+    "${HYPHANET_HOME}/freenet.ini"
+    "${HYPHANET_HOME}/freenet/freenet.ini"
+    "${HYPHANET_HOME}/Freenet/freenet.ini"
+    "${HYPHANET_DATA}/freenet/freenet.ini"
+    "${HYPHANET_DATA}/freenet.ini"
+)
+
+FREENET_INI_PATH=""
+for ini_path in "${POTENTIAL_INI_PATHS[@]}"; do
+    if [ -f "$ini_path" ]; then
+        echo "Found freenet.ini at: $ini_path"
+        FREENET_INI_PATH="$ini_path"
+        break
+    fi
+done
+
+if [ -z "$FREENET_INI_PATH" ]; then
+    echo "WARN: Could not find freenet.ini in common locations!"
+fi
 
 PERSISTENT_ITEMS=(
     "freenet/freenet.ini"    
+    "freenet.ini"
     "freenet.ini.bak" 
     "node.random" 
     "master.keys"
@@ -37,20 +65,34 @@ for item in "${PERSISTENT_ITEMS[@]}"; do
         ln -sf "${dest_path}" "${src_path}"
     fi
 done
-FREENET_INI_PATH="${HYPHANET_DATA}/freenet/freenet.ini"
+
+if [ -z "$FREENET_INI_PATH" ]; then
+    FREENET_INI_PATH="${HYPHANET_HOME}/freenet.ini"
+fi
 WRAPPER_LOG_PATH="${HYPHANET_DATA}/wrapper.log"
 echo "Persistence setup done."
 
 if [ "$1" = 'start' ]; then
-    if [ -f "$FREENET_INI_PATH" ]; then
-        echo "Checking/Updating FProxy settings in $FREENET_INI_PATH..."        
-        sed -i 's#^fproxy.bindTo=.*#fproxy.bindTo=0.0.0.0,::#g' "$FREENET_INI_PATH"
-sed -i 's#^fproxy.allowedHosts=.*#fproxy.allowedHosts=0.0.0.0,::#g' "$FREENET_INI_PATH"
-sed -i 's#^fproxy.allowedHostsFullAccess=.*#fproxy.allowedHostsFullAccess=0.0.0.0,::#g' "$FREENET_INI_PATH"
-        echo "FProxy settings updated to listen on 0.0.0.0 and allow connections from 0.0.0.0/::."
-    else
-        echo "WARN: $FREENET_INI_PATH not found. FProxy might not be accessible from host."
-    fi    
+    for ini_path in "${POTENTIAL_INI_PATHS[@]}"; do
+        if [ -f "$ini_path" ]; then
+            echo "Updating Fproxy configurations in $ini_path..."
+                    
+            sed -i -E 's#^fproxy\.bindTo[[:space:]]*=.*#fproxy.bindTo=0.0.0.0#g' "$ini_path"
+            sed -i -E 's#^fproxy\.allowedHosts[[:space:]]*=.*#fproxy.allowedHosts=*#g' "$ini_path"
+            sed -i -E 's#^fproxy\.allowedHostsFullAccess[[:space:]]*=.*#fproxy.allowedHostsFullAccess=*#g' "$ini_path"
+                        
+            grep -q "^fproxy.enabled" "$ini_path" || echo "fproxy.enabled=true" >> "$ini_path"
+            grep -q "^fproxy.port" "$ini_path" || echo "fproxy.port=8888" >> "$ini_path"
+                        
+            grep -q "^fproxy.bindTo" "$ini_path" || echo "fproxy.bindTo=0.0.0.0" >> "$ini_path"
+            grep -q "^fproxy.allowedHosts" "$ini_path" || echo "fproxy.allowedHosts=*" >> "$ini_path"
+            grep -q "^fproxy.allowedHostsFullAccess" "$ini_path" || echo "fproxy.allowedHostsFullAccess=*" >> "$ini_path"
+            
+            echo "Updated configuration in $ini_path"
+            echo "Current fproxy settings:"
+            grep "fproxy" "$ini_path" || echo "No fproxy settings found!"
+        fi
+    done
 
     echo "Searching for start script..."
     declare -a potential_scripts=(
@@ -77,15 +119,63 @@ sed -i 's#^fproxy.allowedHostsFullAccess=.*#fproxy.allowedHostsFullAccess=0.0.0.
     if [ -n "$found_script" ]; then
         echo "Attempting to start Hyphanet in background using: $found_script"        
         "$found_script" start
-        
-        echo "Waiting 5 seconds for Hyphanet to potentially start..."
-        sleep 5
 
-        echo "Tailing log file ($WRAPPER_LOG_PATH) to keep container running..."        
+        echo "Waiting for Hyphanet to start and listen on port ${HYPHANET_FPROXY_PORT}..."
+        sleep 15 
+        
+        if netstat -tuln | grep -q "127.0.0.1:${HYPHANET_FPROXY_PORT}"; then
+             echo "Hyphanet detected listening on 127.0.0.1:${HYPHANET_FPROXY_PORT}, starting SOCAT proxy..."
+
+             
+             echo "Starting socat to redirect 0.0.0.0:${SOCAT_LISTEN_PORT} -> 127.0.0.1:${HYPHANET_FPROXY_PORT}"
+             socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:${HYPHANET_FPROXY_PORT} &
+             SOCAT_PID=$!
+             echo "Proxy SOCAT IPv4 started with PID: $SOCAT_PID"
+             
+             if netstat -tuln | grep -q "::1:${HYPHANET_FPROXY_PORT}"; then
+                 echo "Hyphanet detected listening on ::1:${HYPHANET_FPROXY_PORT}, starting SOCAT IPv6 proxy..."                 
+                 echo "Starting socat to redirect [::]:${SOCAT_LISTEN_PORT} -> [::1]:${HYPHANET_FPROXY_PORT}"
+                 socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=:: TCP:[::1]:${HYPHANET_FPROXY_PORT} &
+                 SOCAT_IPV6_PID=$!
+                 echo "Proxy SOCAT IPv6 started with PID: $SOCAT_IPV6_PID"
+             else
+                 echo "Hyphanet not detected listening on ::1:${HYPHANET_FPROXY_PORT}, skipping IPv6 SOCAT proxy."                 
+             fi
+        
+        elif netstat -tuln | grep -q "0.0.0.0:${HYPHANET_FPROXY_PORT}"; then
+             echo "Hyphanet detected listening on 0.0.0.0:${HYPHANET_FPROXY_PORT} (but not 127.0.0.1), starting SOCAT proxy..."
+             
+             echo "Starting socat to redirect 0.0.0.0:${SOCAT_LISTEN_PORT} -> 0.0.0.0:${HYPHANET_FPROXY_PORT}"
+             socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=0.0.0.0 TCP:0.0.0.0:${HYPHANET_FPROXY_PORT} &
+             SOCAT_PID=$!
+             echo "Proxy SOCAT IPv4 started with PID: $SOCAT_PID"
+             
+             if netstat -tuln | grep -q "\[::\]:${HYPHANET_FPROXY_PORT}"; then 
+                 echo "Hyphanet detected listening on [::]:${HYPHANET_FPROXY_PORT} (but not ::1), starting SOCAT IPv6 proxy..."
+                 echo "Starting socat to redirect [::]:${SOCAT_LISTEN_PORT} -> [::]:${HYPHANET_FPROXY_PORT}"
+                 socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=:: TCP:[::]:${HYPHANET_FPROXY_PORT} &
+                 SOCAT_IPV6_PID=$!
+                 echo "Proxy SOCAT IPv6 started with PID: $SOCAT_IPV6_PID"
+             else
+                 echo "Hyphanet not detected listening on [::]:${HYPHANET_FPROXY_PORT}, skipping IPv6 SOCAT proxy."
+             fi
+
+        else
+             echo "-------------------------------------------------------------"
+             echo "ERROR: Hyphanet wasn't detected listening on port ${HYPHANET_FPROXY_PORT} after 15 seconds."
+             echo "Check current ports in usage:"
+             netstat -tuln
+             echo "Cannot start SOCAT proxy."
+             echo "-------------------------------------------------------------"             
+        fi
+
+
+        echo "Tailing log file ($WRAPPER_LOG_PATH) to keep container running..."
         if [ ! -f "$WRAPPER_LOG_PATH" ]; then
             echo "WARN: Log file $WRAPPER_LOG_PATH not found. Creating empty file."
-            touch "$WRAPPER_LOG_PATH"            
-        fi        
+            touch "$WRAPPER_LOG_PATH"
+        fi         
+        sleep 5
         tail -f "$WRAPPER_LOG_PATH"
     else
         echo "-------------------------------------------------------------"

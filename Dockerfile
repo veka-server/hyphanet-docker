@@ -1,6 +1,6 @@
 FROM eclipse-temurin:21.0.7_6-jre-jammy AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \    
     wget \
     ca-certificates \
     unzip \
@@ -80,6 +80,12 @@ ENV HYPHANET_GID=1000
 ENV HYPHANET_HOME=/opt/hyphanet
 ENV HYPHANET_DATA=/data
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    net-tools \
+    iproute2 \
+    socat \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid ${HYPHANET_GID} ${HYPHANET_USER} && \
     useradd --uid ${HYPHANET_UID} --gid ${HYPHANET_GID} --shell /bin/bash --create-home ${HYPHANET_USER}
 
@@ -94,7 +100,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 USER ${HYPHANET_USER}
 WORKDIR ${HYPHANET_HOME}
 
-EXPOSE 8888
+EXPOSE 8000
 VOLUME [ "${HYPHANET_DATA}" ]
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
