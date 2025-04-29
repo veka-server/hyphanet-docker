@@ -27,7 +27,7 @@ A ready-to-use Docker image for Hyphanet that:
 ```bash
 docker run -d \
   --name hyphanet \
-  -p 127.0.0.1:8889:8888 \
+  -p 127.0.0.1:8888:8888 \
   -v hyphanet_data:/data \
   poullorca/hyphanet-node:latest
 ```
@@ -36,7 +36,7 @@ docker run -d \
 1. Wait 2-3 minutes for initial setup
 2. Open in your browser:
    ```
-   http://localhost:8889
+   http://localhost:8888
    ```
 
 ## Data Persistence
@@ -71,7 +71,7 @@ This project is provided as-is. The maintainer:
 docker build -t hyphanet-node .
 
 # Test locally
-docker run -it --rm -p 8889:8888 hyphanet-node
+docker run -it --rm -p 8888:8888 hyphanet-node
 
 # Contributing
 PRs welcome at https://github.com/PoulLorca/hyphanet-docker
